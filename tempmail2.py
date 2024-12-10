@@ -2,10 +2,21 @@ import requests
 import json
 import re
 import time
-import webbrowser
 import uuid
+import random
+import subprocess
+import sys
+from datetime import datetime, timedelta
 
 from html2text import HTML2Text
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 
 class TempMailDiscordVerifier:
@@ -18,19 +29,6 @@ class TempMailDiscordVerifier:
         self.html_converter.ignore_images = True
 
     def load_api_key(self) -> str:
-        """
-        Load the API key from a configuration file or prompt the user to enter it.
-
-        This method attempts to read the API key from a JSON configuration file.
-        If the file is not found, it prompts the user to enter the API key and
-        saves it for future use.
-
-        Returns:
-            str: The API key for TempMail service.
-
-        Raises:
-            FileNotFoundError: If the configuration file is not found (handled internally).
-        """
         try:
             with open(self.config_file, 'r') as f:
                 config = json.load(f)
@@ -40,31 +38,75 @@ class TempMailDiscordVerifier:
             self.save_api_key(api_key)
             return api_key
 
-
     def save_api_key(self, api_key) -> None:
         with open(self.config_file, 'w') as f:
             json.dump({'api_key': api_key}, f)
 
+    def generate_random_username(self):
+        adjectives = ['Cool', 'Epic', 'Awesome', 'Brave', 'Swift', 'Silent', 'Mystic', 'Rapid', 'Clever', 'Bold']
+        nouns = ['Gamer', 'Wolf', 'Phoenix', 'Dragon', 'Ninja', 'Warrior', 'Knight', 'Eagle', 'Shadow', 'Titan']
+        numbers = ''.join([str(random.randint(0, 9)) for _ in range(3)])
+        return f"{random.choice(adjectives)}{random.choice(nouns)}{numbers}"
+
+    def generate_random_password(self, length=12):
+        characters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+'
+        return ''.join(random.choice(characters) for _ in range(length))
+
+    def generate_random_birthdate(self):
+        current_year = datetime.now().year
+        birth_year = random.randint(1980, current_year - 18)
+        birth_month = random.randint(1, 12)
+        
+        if birth_month in [1, 3, 5, 7, 8, 10, 12]:
+            birth_day = random.randint(1, 31)
+        elif birth_month in [4, 6, 9, 11]:
+            birth_day = random.randint(1, 30)
+        else:  # February
+            birth_day = random.randint(1, 28)
+        
+        return birth_year, birth_month, birth_day
+
+    def fill_discord_registration(self, driver, email, display_name, username, password, birth_year, birth_month, birth_day):
+        wait = WebDriverWait(driver, 20)
+
+        try:
+            email_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="email"]')))
+            email_input.clear()
+            email_input.send_keys(email)
+
+            display_name_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="displayName"]')))
+            display_name_input.clear()
+            display_name_input.send_keys(display_name)
+
+            username_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="username"]')))
+            username_input.clear()
+            username_input.send_keys(username)
+
+            password_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="password"]')))
+            password_input.clear()
+            password_input.send_keys(password)
+
+            year_select = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="year"]')))
+            year_select.clear()
+            year_select.send_keys(str(birth_year))
+
+            month_select = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="month"]')))
+            month_select.clear()
+            month_select.send_keys(str(birth_month))
+
+            day_select = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="day"]')))
+            day_select.clear()
+            day_select.send_keys(str(birth_day))
+
+            continue_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//button[contains(text(), "Continue")]')))
+            continue_button.click()
+
+        except Exception as e:
+            print(f"Error filling registration form: {e}")
+            driver.save_screenshot('registration_error.png')
+            raise
+
     def create_inbox(self) -> dict | None:
-        """
-        Create a new temporary email inbox using the TempMail API.
-
-        This method attempts to create an inbox using different payload options,
-        including an empty payload, a payload with a random prefix, a payload with
-        a specific domain, and a payload with both a random prefix and specific domain.
-
-        Returns:
-            dict or None: A dictionary containing the created inbox details if successful,
-                          including the email address and token. Returns None if all
-                          creation attempts fail.
-
-        Raises:
-            requests.exceptions.RequestException: If there's an error in making the API request.
-
-        Note:
-            The method will try different payload options in case of failure,
-            printing error messages for each failed attempt.
-        """
         headers = {
             'Authorization': self.api_key,
             'Content-Type': 'application/json',
@@ -96,25 +138,7 @@ class TempMailDiscordVerifier:
 
         return None
 
-
     def fetch_emails(self, token) -> dict | None:
-        """
-        Fetch emails from the temporary email inbox using the TempMail API.
-
-        This method sends a GET request to the TempMail API to retrieve emails
-        associated with the given token.
-
-        Args:
-            token (str): The unique token associated with the temporary email inbox.
-
-        Returns:
-            dict or None: A dictionary containing the fetched emails if the request is
-                          successful (status code 200). Returns None if there's an error
-                          or if the request fails.
-
-        Raises:
-            requests.exceptions.RequestException: If there's an error in making the API request.
-        """
         headers = {
             'Authorization': self.api_key,
             'User-Agent': 'Mozilla/5.0'
@@ -136,26 +160,7 @@ class TempMailDiscordVerifier:
             print(f"Request error: {e}")
             return None
 
-
     def extract_verification_link(self, emails) -> str | None:
-        """
-        Extract the Discord verification link from a list of emails.
-
-        This function searches through the provided emails for a Discord verification
-        email and attempts to extract the verification link from its content.
-
-        Args:
-            emails (list): A list of dictionaries, where each dictionary represents
-                           an email with 'subject' and 'body' keys.
-
-        Returns:
-            str or None: The extracted Discord verification link if found, otherwise None.
-
-        Note:
-            The function first checks for HTML content in the email body and converts
-            it to plain text if present. It then uses a regular expression to search
-            for the Discord verification link pattern.
-        """
         for email in emails:
             if 'Discord' in email.get('subject', ''):
                 if 'html' in email.get('body', '').lower():
@@ -175,23 +180,7 @@ class TempMailDiscordVerifier:
 
         return None
 
-
     def run(self) -> str | None:
-        """
-        Execute the main workflow for creating a temporary email and retrieving a Discord verification link.
-
-        This method performs the following steps:
-        1. Creates a temporary email inbox.
-        2. Waits for incoming emails and checks for a Discord verification link.
-        3. If found, saves the link to a file and optionally opens it in a browser.
-
-        Returns:
-            str or None: The Discord verification link if found, otherwise None.
-
-        Note:
-            - The method will make multiple attempts to fetch emails and extract the verification link.
-            - It will print status updates and prompts to the console during execution.
-        """
         print("🚀〡Creating Temporary Email...")
         inbox = self.create_inbox()
 
@@ -206,43 +195,78 @@ class TempMailDiscordVerifier:
         token = inbox['token']
 
         print(f"📧〡Email: {email}")
-        print("⏳〡Waiting for Discord verification link...")
 
-        try_count = 0
-        max_tries = 20
+        username = self.generate_random_username()
+        display_name = username
+        password = self.generate_random_password()
+        birth_year, birth_month, birth_day = self.generate_random_birthdate()
 
-        while try_count < max_tries:
-            emails_data = self.fetch_emails(token)
+        print(f"🔒〡Username: {username}")
+        print(f"🔑〡Password: {password}")
+        print(f"🎂〡Birth Date: {birth_month}/{birth_day}/{birth_year}")
 
-            if emails_data and emails_data.get('emails'):
-                verification_link = self.extract_verification_link(emails_data['emails'])
+        chrome_options = Options()
+        chrome_options.add_argument('--incognito')
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.get('https://discord.com/register')
 
-                if verification_link:
-                    print("\n🎉〡Discord Verification Link Found!")
-                    print(f"🔗〡Link: {verification_link}")
+        try:
+            self.fill_discord_registration(
+                driver, 
+                email, 
+                display_name, 
+                username, 
+                password, 
+                birth_year, 
+                birth_month, 
+                birth_day
+            )
 
-                    with open('discord_verification_link.txt', 'w') as f:
-                        f.write(verification_link)
+            print("⏳〡Waiting for Discord verification link...")
 
-                    choice = input("Open verification link in browser? (y/n): ").lower()
-                    if choice == 'y':
-                        webbrowser.open(verification_link)
+            try_count = 0
+            max_tries = 20
 
-                    return verification_link
+            while try_count < max_tries:
+                emails_data = self.fetch_emails(token)
 
-            time.sleep(10)
-            try_count += 1
-            print(f"🕵️〡Checking emails... (Attempt {try_count}/{max_tries}) {time.strftime('%H:%M:%S')}")
+                if emails_data and emails_data.get('emails'):
+                    verification_link = self.extract_verification_link(emails_data['emails'])
 
-        print("❌〡No verification link found after multiple attempts.")
-        return None
+                    if verification_link:
+                        print("\n🎉〡Discord Verification Link Found!")
+                        print(f"🔗〡Link: {verification_link}")
 
+                        with open('discord_verification_link.txt', 'w') as f:
+                            f.write(verification_link)
 
+                        choice = input("Open verification link in browser? (y/n): ").lower()
+                        if choice == 'y':
+                            driver.get(verification_link)
+
+                        return verification_link
+
+                time.sleep(10)
+                try_count += 1
+                print(f"🕵️〡Checking emails... (Attempt {try_count}/{max_tries}) {time.strftime('%H:%M:%S')}")
+
+            print("❌〡No verification link found after multiple attempts.")
+            return None
+
+        except Exception as e:
+            print(f"Error during registration: {e}")
+            driver.save_screenshot('registration_error.png')
+        finally:
+            driver.quit()
 
 def main():
     verifier = TempMailDiscordVerifier()
     verifier.run()
-
 
 if __name__ == '__main__':
     main()
