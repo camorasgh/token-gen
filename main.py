@@ -15,11 +15,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 
-class Verifier:
+class Verifier(Config):
     def __init__(self, api_key=None):
+        super().__init__()  # Initialize Config parent class
         self.base_url = 'https://api.tempmail.lol'
         self.config_file = 'tempmail_config.json'
-        self.api_key = api_key or Config.load_api_key()
+        self.api_key = api_key or self.load_api_key()  # Now we can call load_api_key directly
         self.html_converter = HTML2Text()
         self.html_converter.ignore_links = False
         self.html_converter.ignore_images = True
